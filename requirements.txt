@@ -1,3 +1,4 @@
+# ── Existing dependencies (unchanged) ────────────────────────────────────────
 streamlit
 groq
 sentence-transformers
@@ -9,3 +10,16 @@ duckduckgo-search
 pandas
 python-dotenv
 numpy
+
+# ── NEW: LangGraph agent dependencies ────────────────────────────────────────
+langchain>=0.3.0
+langchain-core>=0.3.0
+langchain-groq>=0.2.0          # LangChain wrapper for Groq
+langgraph>=0.2.0               # ReAct agent + MemorySaver
+langchain-community>=0.3.0     # Community tools
+
+# ── Optional: Tavily (better web search than DuckDuckGo) ─────────────────────
+# Requires TAVILY_API_KEY in .env — free tier available at https://tavily.com
+langchain-tavily>=0.1.0
+tavily-python>=0.5.0
+

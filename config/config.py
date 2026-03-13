@@ -31,6 +31,9 @@ SIMILARITY_THRESHOLD: float = float(os.getenv("SIMILARITY_THRESHOLD", "3.0"))
 # ── Web Search ────────────────────────────────────────────────────────────────
 MAX_SEARCH_RESULTS: int = int(os.getenv("MAX_SEARCH_RESULTS", "4"))
 
+# ── NEW: Tavily (optional — falls back to DuckDuckGo if not set) ──────────────
+TAVILY_API_KEY: str = os.getenv("TAVILY_API_KEY", "")
+
 # ── App ───────────────────────────────────────────────────────────────────────
 APP_TITLE: str = "Universal Knowledge Assistant"
 APP_ICON: str = "🧠"

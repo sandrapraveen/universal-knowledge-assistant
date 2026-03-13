@@ -2,8 +2,15 @@
 app.py
 ------
 Universal Knowledge Assistant — Streamlit UI.
-Orchestrates document ingestion, YouTube loading, RAG retrieval,
-web search fallback, and LLM answer generation.
+Orchestrates document ingestion, YouTube loading, and the
+Agentic RAG pipeline (LangGraph ReAct agent with memory).
+
+Changes from v1:
+  - _handle_question() now calls run_agent() instead of
+    retrieve_context() + web_search() directly.
+  - Thread ID added to session state for conversation memory.
+  - Agent tool-call trace shown in an expander for transparency.
+  - All other UI, ingestion, and chat-history logic is unchanged.
 """
 
 import logging
@@ -12,15 +19,15 @@ import os
 
 import streamlit as st
 
-# Ensure project root is on the path (needed when running via streamlit run)
 sys.path.insert(0, os.path.dirname(__file__))
 
 from config.config import APP_TITLE, APP_ICON, MAX_HISTORY
-from models.llm import generate_answer
 from utils.document_loader import load_file
 from utils.youtube_loader import load_youtube
-from utils.web_search import web_search
 from utils.rag_pipeline import RAGPipeline, format_sources
+
+# ── NEW: agent imports ────────────────────────────────────────────────────────
+from utils.agent_manager import run_agent, new_thread_id
 
 # ── Logging ───────────────────────────────────────────────────────────────────
 logging.basicConfig(
@@ -44,8 +51,10 @@ st.set_page_config(
 def _init_state() -> None:
     defaults = {
         "rag": RAGPipeline(),
-        "chat_history": [],        # [{"role": "user"|"assistant", "content": str, "sources": list}]
-        "indexed_sources": [],     # Display names of all indexed sources
+        "chat_history": [],
+        "indexed_sources": [],
+        # ── NEW: unique thread ID per browser session ──
+        "thread_id": new_thread_id(),
     }
     for k, v in defaults.items():
         if k not in st.session_state:
@@ -56,36 +65,34 @@ _init_state()
 
 
 # ─────────────────────────────────────────────
-# Helpers
+# Helpers (UNCHANGED)
 # ─────────────────────────────────────────────
 
 def _add_to_index(chunks: list, label: str) -> None:
-    """Index chunks and record the source label."""
     st.session_state.rag.add_documents(chunks)
     if label not in st.session_state.indexed_sources:
         st.session_state.indexed_sources.append(label)
 
 
 def _reset_knowledge_base() -> None:
-    """Clear the vector store and all session state."""
     st.session_state.rag.clear()
     st.session_state.indexed_sources = []
     st.session_state.chat_history = []
+    # ── NEW: reset memory thread so agent forgets old conversation ──
+    st.session_state.thread_id = new_thread_id()
     st.rerun()
 
 
 # ─────────────────────────────────────────────
-# Sidebar
+# Sidebar (UNCHANGED except thread_id display)
 # ─────────────────────────────────────────────
 
 def render_sidebar() -> dict:
-    """Render the sidebar and return UI settings."""
     with st.sidebar:
         st.title(f"{APP_ICON} {APP_TITLE}")
         st.caption("Turn your documents and videos into a queryable knowledge base.")
         st.divider()
 
-        # ── Response Mode ─────────────────────────────
         st.subheader("💬 Response Mode")
         mode = st.radio(
             "Select mode",
@@ -96,7 +103,6 @@ def render_sidebar() -> dict:
 
         st.divider()
 
-        # ── Document Upload ───────────────────────────
         st.subheader("📂 Upload Documents")
         uploaded_files = st.file_uploader(
             "PDF, DOCX, TXT, MD, CSV, JSON",
@@ -104,14 +110,12 @@ def render_sidebar() -> dict:
             accept_multiple_files=True,
             key="file_uploader",
         )
-
         if uploaded_files:
             if st.button("📥 Index uploaded files", use_container_width=True):
                 _process_uploaded_files(uploaded_files)
 
         st.divider()
 
-        # ── YouTube URLs ──────────────────────────────
         st.subheader("🎬 Add YouTube Videos")
         yt_input = st.text_area(
             "One URL per line",
@@ -119,13 +123,11 @@ def render_sidebar() -> dict:
             height=100,
             key="yt_input",
         )
-
         if st.button("📥 Load YouTube transcripts", use_container_width=True):
             _process_youtube_urls(yt_input)
 
         st.divider()
 
-        # ── Knowledge base status ─────────────────────
         st.subheader("📚 Knowledge Base")
         chunk_count = st.session_state.rag.document_count()
         if chunk_count > 0:
@@ -140,17 +142,19 @@ def render_sidebar() -> dict:
         if st.button("🗑️ Clear everything", use_container_width=True):
             _reset_knowledge_base()
 
-        st.caption("Powered by Groq · FAISS · all-MiniLM-L6-v2 · DuckDuckGo")
+        # ── NEW: show memory thread ID for debugging ──
+        with st.expander("🔧 Debug", expanded=False):
+            st.caption(f"Thread ID: `{st.session_state.thread_id[:8]}…`")
+
+        st.caption("Powered by Groq · LangGraph · FAISS · all-MiniLM-L6-v2")
 
     return {"mode": mode.lower()}
 
 
 def _process_uploaded_files(uploaded_files) -> None:
-    """Load and index a batch of uploaded files."""
     progress = st.sidebar.progress(0)
     total = len(uploaded_files)
     success_count = 0
-
     for i, f in enumerate(uploaded_files):
         with st.sidebar.status(f"Indexing {f.name}…"):
             try:
@@ -162,19 +166,16 @@ def _process_uploaded_files(uploaded_files) -> None:
                 st.write(f"❌ {f.name}: {e}")
                 logger.error("Failed to index '%s': %s", f.name, e)
         progress.progress((i + 1) / total)
-
     progress.empty()
     if success_count > 0:
         st.sidebar.success(f"Indexed {success_count}/{total} file(s).")
 
 
 def _process_youtube_urls(raw_input: str) -> None:
-    """Parse and index YouTube URLs from the text area."""
     urls = [line.strip() for line in raw_input.splitlines() if line.strip()]
     if not urls:
         st.sidebar.warning("Please enter at least one YouTube URL.")
         return
-
     for url in urls:
         with st.sidebar.status(f"Loading: {url[:60]}…"):
             try:
@@ -187,59 +188,63 @@ def _process_youtube_urls(raw_input: str) -> None:
 
 
 # ─────────────────────────────────────────────
-# Chat interface
+# Chat interface (UNCHANGED except _handle_question)
 # ─────────────────────────────────────────────
 
 def render_chat(settings: dict) -> None:
-    """Render the main chat area."""
     st.title(f"{APP_ICON} {APP_TITLE}")
     st.caption(
         "Upload documents or add YouTube URLs in the sidebar, then ask questions below."
     )
     st.divider()
 
-    # ── Chat history ──────────────────────────
     for entry in st.session_state.chat_history:
         with st.chat_message(entry["role"]):
             st.markdown(entry["content"])
-            # Show sources only for assistant turns
             if entry["role"] == "assistant" and entry.get("sources"):
-                _render_sources(entry["sources"], entry.get("used_web", False))
+                _render_sources(
+                    entry["sources"],
+                    entry.get("used_web", False),
+                    entry.get("tool_calls", []),
+                )
 
-    # ── Input ─────────────────────────────────
     question = st.chat_input("Ask a question about your knowledge base…")
     if question:
         _handle_question(question, settings["mode"])
 
 
-def _render_sources(sources: list, used_web: bool) -> None:
-    """Render the source citations in an expander."""
-    label = "🌐 Web search results used" if used_web else "📎 Sources from knowledge base"
+def _render_sources(sources: list, used_web: bool, tool_calls: list = None) -> None:
+    tool_calls = tool_calls or []
+    label = "🌐 Web search used" if used_web else "📎 Sources from knowledge base"
     with st.expander(label, expanded=False):
         if used_web:
-            st.info("No relevant content was found in your documents. Web search was used.")
-        else:
-            for src in sources:
-                st.markdown(f"- {src}")
+            st.info("Tavily / DuckDuckGo web search was used for this answer.")
+        for src in sources:
+            st.markdown(f"- {src}")
+        # ── NEW: show agent tool trace ──
+        if tool_calls:
+            st.caption(f"🤖 Agent tools used: {', '.join(tool_calls)}")
 
+
+# ─────────────────────────────────────────────
+# ── CHANGED: _handle_question now calls run_agent()
+# ─────────────────────────────────────────────
 
 def _handle_question(question: str, mode: str) -> None:
     """
-    Process a user question through the RAG pipeline.
+    Process a user question through the LangGraph ReAct agent.
 
-    Pipeline:
-    1. Embed question → search FAISS
-    2. If good match → use local context
-    3. If no match → fall back to web search
-    4. Send context to Groq LLM
-    5. Display answer + sources
+    The agent autonomously decides whether to use:
+      - document_retriever  (FAISS / local knowledge)
+      - web_search          (Tavily or DuckDuckGo)
+      - direct LLM reasoning
+
+    Conversation memory is maintained across turns via thread_id.
     """
-    # Display user message
     with st.chat_message("user"):
         st.markdown(question)
     st.session_state.chat_history.append({"role": "user", "content": question})
 
-    # Trim history
     if len(st.session_state.chat_history) > MAX_HISTORY:
         st.session_state.chat_history = st.session_state.chat_history[-MAX_HISTORY:]
 
@@ -247,57 +252,47 @@ def _handle_question(question: str, mode: str) -> None:
         answer_placeholder = st.empty()
         source_placeholder = st.empty()
 
-        with st.spinner("Thinking…"):
-
-            # ── Step 1: RAG retrieval ──────────────────
-            context, retrieved_chunks, needs_web = st.session_state.rag.retrieve_context(question)
-            used_web = False
-            sources = []
-
-            # ── Step 2: Web search fallback ───────────
-            if needs_web:
-                with st.spinner("🔍 Searching the web…"):
-                    try:
-                        context = web_search(question)
-                        used_web = True
-                        sources = ["Web search (DuckDuckGo)"]
-                    except Exception as e:
-                        context = ""
-                        logger.error("Web search failed: %s", e)
-            else:
-                sources = format_sources(retrieved_chunks)
-
-            # ── Step 3: Generate answer ────────────────
+        with st.spinner("Agent is thinking…"):
             try:
-                # If context is empty, the LLM will behave like a normal chatbot
-                answer = generate_answer(
+                # ── SINGLE CALL replaces retrieve_context() + web_search() + generate_answer()
+                result = run_agent(
                     question=question,
-                    context=context or "",
+                    rag_pipeline=st.session_state.rag,
+                    thread_id=st.session_state.thread_id,
                     mode=mode,
                 )
-            except Exception as e:
-                answer = f"❌ LLM error: {e}"
-                logger.error("LLM generation error: %s", e)
+                answer = result.answer
+                sources = result.sources
+                used_web = result.used_web
+                tool_calls = result.tool_calls
 
-        # ── Display ────────────────────────────────
+            except Exception as e:
+                answer = f"❌ Agent error: {e}"
+                sources = []
+                used_web = False
+                tool_calls = []
+                logger.error("Agent error: %s", e)
+
         answer_placeholder.markdown(answer)
-        if sources:
+
+        if sources or tool_calls:
             with source_placeholder.expander(
-                "🌐 Web search results used" if used_web else "📎 Sources from knowledge base",
+                "🌐 Web search used" if used_web else "📎 Sources from knowledge base",
                 expanded=False,
             ):
                 if used_web:
-                    st.info("No relevant content was found in your documents. Web search was used.")
-                else:
-                    for src in sources:
-                        st.markdown(f"- {src}")
+                    st.info("Tavily / DuckDuckGo web search was used for this answer.")
+                for src in sources:
+                    st.markdown(f"- {src}")
+                if tool_calls:
+                    st.caption(f"🤖 Agent tools used: {', '.join(tool_calls)}")
 
-    # Append assistant turn to history
     st.session_state.chat_history.append({
         "role": "assistant",
         "content": answer,
         "sources": sources,
         "used_web": used_web,
+        "tool_calls": tool_calls,
     })
 
 
