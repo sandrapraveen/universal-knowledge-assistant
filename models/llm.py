@@ -38,8 +38,7 @@ _CONCISE_SYSTEM = (
     "Answer questions using ONLY the provided context. "
     "Keep answers short and direct (2–4 sentences). "
     "Do not hallucinate. If the context does not contain the answer, say so. "
-    "At the end of your answer, list the sources used in the format:\n"
-    "Sources:\n- <source name> — <page/timestamp/detail if available>"
+    "Do NOT include source references in the answer."
 )
 
 _DETAILED_SYSTEM = (
@@ -47,8 +46,7 @@ _DETAILED_SYSTEM = (
     "Answer questions using ONLY the provided context. "
     "Provide a comprehensive, well-structured answer with explanations and examples where relevant. "
     "Do not hallucinate. If the context does not fully cover the question, acknowledge the gap. "
-    "At the end of your answer, list the sources used in the format:\n"
-    "Sources:\n- <source name> — <page/timestamp/detail if available>"
+    "Do NOT include source references in the answer."
 )
 
 
