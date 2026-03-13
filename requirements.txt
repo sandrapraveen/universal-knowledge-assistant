@@ -1,0 +1,11 @@
+streamlit
+groq
+sentence-transformers
+faiss-cpu
+pypdf
+python-docx
+youtube-transcript-api
+duckduckgo-search
+pandas
+python-dotenv
+numpy
