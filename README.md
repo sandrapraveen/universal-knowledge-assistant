@@ -11,7 +11,7 @@ Built with:
 ## Live App
 
 Streamlit Deployment  
-https://YOUR_STREAMLIT_LINK
+https://cogniva-c6uj3ybbrdc6kleokoavqm.streamlit.app/
 
 ---
 
@@ -129,7 +129,7 @@ streamlit run app.py
 ## Deployment
 
 Streamlit Cloud  
-https://YOUR_STREAMLIT_LINK
+https://cogniva-c6uj3ybbrdc6kleokoavqm.streamlit.app/
 
 ---
 
