@@ -60,7 +60,7 @@ Clone the repository
 
 ```
 
-git clone [https://github.com/YOUR_USERNAME/cogniva.git](https://github.com/YOUR_USERNAME/cogniva.git)
+git clone [https://github.com/sandrapraveen/cogniva.git](https://github.com/sandrapraveen/cogniva.git)
 cd cogniva
 
 ```
